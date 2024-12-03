@@ -1,0 +1,301 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report
+from imblearn.over_sampling import SMOTE
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+from sklearn.ensemble import VotingClassifier
+from sklearn.model_selection import train_test_split
+import pandas as pd
+
+from autogluon.tabular import TabularPredictor
+
+
+#neural net
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+df = pd.read_csv("data_breast.csv") 
+
+# Features 
+X = df[['LYMPH_NODES_EXAMINED_POSITIVE', 'CELLULARITY',
+        'CHEMOTHERAPY', 'RADIO_THERAPY', 'HORMONE_THERAPY', 'ER_IHC', 'HER2_SNP6',
+        'INFERRED_MENOPAUSAL_STATE', 'AGE_AT_DIAGNOSIS', 'CLAUDIN_SUBTYPE',
+        'THREEGENE', 'LATERALITY', 'HISTOLOGICAL_SUBTYPE', 'BREAST_SURGERY']]
+
+y = df['5_YEAR_SURVIVAL']
+# Balancing Sampling 
+# smote = SMOTE(random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42) # 30:70 test:validate split 
+# smote = SMOTE(sampling_strategy={0: 1400, 1: len(y_train[y_train == 1])}, random_state=42)
+# print("total y", len(y_train[y_train == 1]))
+# X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train) # create synthetic data 
+#print(f"Class distribution after SMOTE: {Counter(y_train_resampled)}")
+
+
+X_train_main, X_val, y_train_main, y_val = train_test_split(
+    X_train, y_train, test_size=0.2, random_state=42  # 20% for validation
+)
+
+# Step 2: Apply SMOTE only to the training set
+smote = SMOTE(sampling_strategy='minority', random_state=42)
+X_train_resampled, y_train_resampled = smote.fit_resample(X_train_main, y_train_main)
+
+
+# Log regression
+model = LogisticRegression(class_weight={0: 1, 1: 1}, max_iter=1000)
+model.fit(X_train_resampled, y_train_resampled)
+# Evaluate 
+y_pred = model.predict(X_test)
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("Log Reg Classification Report:\n", classification_report(y_test, y_pred))
+
+# Random Forest optimized
+random_forest_model_opt = RandomForestClassifier(
+    n_estimators=300,          # Number of trees
+    max_depth=20,            # Maximum depth of each tree (None = expand until leaves are pure)
+    min_samples_leaf=1,   
+    min_samples_split=2, # Minimum samples to split an internal node
+    class_weight='balanced',   # Handle class imbalance
+    random_state=42            # For reproducibility
+)
+# Train 
+random_forest_model_opt.fit(X_train_resampled, y_train_resampled)
+# Evaluate Optimized Random Forest 
+y_pred = random_forest_model_opt.predict(X_test)
+print("Random Forest Results 2:")
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+print(classification_report(y_test, y_pred))
+
+# # cross validation 
+# param_grid = {
+#     'n_estimators': [100, 200, 300, 500],
+#     'max_depth': [10, 20, 50, None],
+#     'min_samples_split': [2, 5, 10, 20],
+#     'min_samples_leaf': [1, 2, 4, 8],
+#     'class_weight': ['balanced', 'balanced_subsample']
+# }
+# grid_search = GridSearchCV(
+#     estimator=RandomForestClassifier(random_state=42),
+#     param_grid=param_grid,
+#     scoring='recall',  # Focus on improving recall
+#     cv=5, # 5 fold cross validation 
+#     n_jobs = -1,
+#     #verbose=2
+# )
+# grid_search.fit(X_train, y_train)
+# print("Best Parameters:", grid_search.best_params_)
+
+
+# SVM 
+
+# Standardize the features
+scaler = StandardScaler()
+X_train_resampled_scaled = scaler.fit_transform(X_train_resampled)
+X_test_scaled = scaler.transform(X_test)
+
+# Initialize the SVM model
+# svm_model = SVC(kernel='rbf', class_weight='balanced', probability=True, random_state=42)
+# # Train the model
+# svm_model.fit(X_train, y_train)
+# # Predict on the test set
+# y_pred = svm_model.predict(X_test)
+# # Evaluate SVM 
+# print("SVM Results:")
+# print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+# print("Classification Report:")
+# print(classification_report(y_test, y_pred))
+
+
+# SVM on scaled data 
+# Initialize the SVM model
+svm_model = SVC(kernel='rbf', class_weight='balanced', probability=True, random_state=42)
+# Train the model
+svm_model.fit(X_train_resampled_scaled, y_train_resampled)
+# Predict on the test set
+y_pred = svm_model.predict(X_test_scaled)
+# Evaluate SVM 
+print("SVM Results scaled data:")
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+print("Classification Report:")
+print(classification_report(y_test, y_pred))
+
+y_probs = svm_model.predict_proba(X_test_scaled)[:, 1]
+threshold = 0.4  # Lower the threshold for class 1
+y_pred_threshold = (y_probs > threshold).astype(int)
+print("Classification Report on threshold:")
+print(classification_report(y_test, y_pred_threshold))
+
+
+scaler = StandardScaler()
+X_train_resampled_scaled = scaler.fit_transform(X_train_resampled)
+X_val_scaled = scaler.transform(X_val)
+X_test_scaled = scaler.transform(X_test)
+
+# neural network
+# scaler = StandardScaler()
+# X_train_resampled_scaled = scaler.fit_transform(X_train_resampled)
+# X_test_scaled = scaler.transform(X_test)
+
+# Step 2: Convert the data to PyTorch tensors
+X_train_tensor = torch.tensor(X_train_resampled_scaled, dtype=torch.float32)
+y_train_tensor = torch.tensor(y_train_resampled.values, dtype=torch.float32)  # Convert target to tensor
+
+X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
+y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32)  # Convert target to tensor
+
+X_val_tensor = torch.tensor(X_val_scaled, dtype=torch.float32)
+y_val_tensor = torch.tensor(y_val.values, dtype=torch.float32)
+
+
+class NeuralNet(nn.Module):
+    def __init__(self, input_size):
+        super(NeuralNet, self).__init__()
+        self.fc1 = nn.Linear(input_size, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, 1)  # Direct output layer
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(p=0.3)  # Adjusted dropout rate
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.dropout(x)  # Apply dropout after activation
+        x = self.fc2(x)
+        x = self.relu(x)
+        x = self.fc3(x)  # No dropout before output
+        return x
+
+
+
+
+
+
+num_samples = len(y_train_resampled)
+num_class_0 = (y_train_resampled == 0).sum()
+num_class_1 = (y_train_resampled == 1).sum()
+print(f"Class 0 count: {num_class_0}, Class 1 count: {num_class_1}")
+
+class_weights = torch.tensor([1.0 / num_class_0, 1.0 / num_class_1], dtype=torch.float32)
+print(f"Class Weights: {class_weights}")
+
+# Initialize model, loss, and optimizer
+input_size = X_train_resampled_scaled.shape[1]
+model = NeuralNet(input_size)
+num_class_0 = sum(y_train_resampled == 0)
+num_class_1 = sum(y_train_resampled == 1)
+pos_weight_value = (num_class_0 / num_class_1) * 7
+criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight_value], dtype=torch.float32))
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
+
+training_losses = []
+validation_losses = []
+# Training Loop
+epochs = 600
+batch_size = 32
+for epoch in range(epochs):
+    model.train()
+    epoch_loss = 0.0
+    for i in range(0, len(X_train_resampled_scaled), batch_size):
+        # Convert batches to PyTorch tensors
+        X_batch = torch.tensor(X_train_resampled_scaled[i:i+batch_size], dtype=torch.float32)
+        y_batch = torch.tensor(y_train_resampled.values[i:i+batch_size], dtype=torch.float32)
+
+        # Forward pass
+        # Training loop remains the same
+        outputs = model(X_batch).squeeze()
+        loss = criterion(outputs, y_batch)
+
+        epoch_loss += loss.item()
+
+        # Backpropagation
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        epoch_loss += loss.item()
+
+    training_losses.append(epoch_loss / len(X_train_resampled_scaled))
+    # Validation phase
+    model.eval()
+    with torch.no_grad():
+        val_outputs = model(X_val_tensor).squeeze()
+        val_loss = criterion(val_outputs, y_val_tensor)
+        validation_losses.append(val_loss.item())
+
+    # Print progress
+    if (epoch + 1) % 10 == 0:
+        print(f"Epoch {epoch+1}/{epochs}, Train Loss: {training_losses[-1]:.4f}, Val Loss: {validation_losses[-1]:.4f}")
+
+
+# Evaluation
+model.eval()
+
+with torch.no_grad():
+    y_logits = model(X_test_tensor).squeeze()
+    y_probs = torch.sigmoid(y_logits)  # Apply sigmoid to get probabilities
+    y_pred = (y_probs > 0.2).int()  # Use threshold for classification
+    print("\nPyTorch Neural Network Results:")
+    print(f"Accuracy: {accuracy_score(y_test_tensor, y_pred):.4f}")
+    print("Classification Report:")
+    print(classification_report(y_test_tensor, y_pred))
+    print("Predicted class distribution:", y_pred.sum().item(), "out of", len(y_pred))
+
+
+# training_losses = []
+# validation_losses = []
+
+# for epoch in range(epochs):
+#     # Training phase
+#     model.train()
+#     epoch_train_loss = 0.0
+#     for i in range(0, len(X_train_tensor), batch_size):
+#         X_batch = torch.tensor(X_train[i:i+batch_size], dtype=torch.float32)
+#         y_batch = torch.tensor(y_train.values[i:i+batch_size], dtype=torch.float32)
+
+#         outputs = model(X_batch).squeeze()
+#         loss = criterion(outputs, y_batch)
+#         epoch_train_loss += loss.item()
+
+#         optimizer.zero_grad()
+#         loss.backward()
+#         optimizer.step()
+
+#     training_losses.append(epoch_train_loss / len(X_train))
+
+#     # Validation phase
+#     model.eval()
+#     with torch.no_grad():
+#         X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
+#         y_val_tensor = torch.tensor(y_val.values, dtype=torch.float32)
+#         val_outputs = model(X_val_tensor).squeeze()
+#         val_loss = criterion(val_outputs, y_val_tensor)
+#         validation_losses.append(val_loss.item())
+
+#     # Print progress
+#     print(f"Epoch {epoch+1}/{epochs}, Train Loss: {training_losses[-1]:.4f}, Val Loss: {validation_losses[-1]:.4f}")
+
+# Plot training vs validation loss
+plt.plot(training_losses, label='Training Loss')
+plt.plot(validation_losses, label='Validation Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.title('Training vs Validation Loss')
+plt.show()
+
+# ensemble_model = VotingClassifier(estimators=[
+#     ('logreg', LogisticRegression()),
+#     ('rf', RandomForestClassifier()),
+#     ('svm', SVC(probability=True))
+# ], voting='soft')  # Use 'soft' for weighted probabilities
+# ensemble_model.fit(X_train_resampled_scaled, y_train_resampled)
+# y_pred = ensemble_model.predict(X_test_scaled)
+# print(classification_report(y_test, y_pred))
+
+
